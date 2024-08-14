@@ -65,7 +65,7 @@ func main() {
 					{Payload: []byte{0x86, 0x48, 0x00}, DeltaTime: time.Second},
 				},
 			}
-
+			log.Println("Sending notes")
 			s.SendMIDICommands(mcs)
 		}
 	}
