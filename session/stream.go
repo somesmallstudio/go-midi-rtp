@@ -57,6 +57,13 @@ func (conn *MIDINetworkStream) SendMIDIMessage(msg rtp.MIDIMessage) {
 	log.Printf("<- outgoing payload: %v", msg)
 }
 
+func (conn *MIDINetworkStream) handleRTP(msg rtp.MIDIMessage, pc net.PacketConn, addr net.Addr) {
+	// log.Printf("RTP message received %#v", msg)
+	if conn.Session != nil {
+		conn.Session.handler(msg, conn.Session)
+	}
+}
+
 // HandleControl a sipControlMessage
 func (conn *MIDINetworkStream) handleControl(msg sip.ControlMessage, pc net.PacketConn, addr net.Addr) {
 	switch msg.Cmd {

@@ -1,6 +1,7 @@
 package session
 
 import (
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"log"
@@ -22,6 +23,13 @@ type MIDINetworkSession struct {
 	SequenceNumber uint16
 	StartTime      time.Time
 	connections    sync.Map
+	handler        MIDIMessageHandlerFunc
+}
+
+type MIDIMessageHandlerFunc func(rtp.MIDIMessage, *MIDINetworkSession)
+
+type MIDIMessageHandler interface {
+	HandleMIDI(rtp.MIDIMessage, *MIDINetworkSession)
 }
 
 // Start is starting a new session
@@ -39,6 +47,10 @@ func Start(bonjourName string, port uint16) (s *MIDINetworkSession) {
 	go messageLoop(port+1, &session)
 
 	return &session
+}
+
+func (s *MIDINetworkSession) Handle(handler MIDIMessageHandlerFunc) {
+	s.handler = handler
 }
 
 // End is ending a session
@@ -86,17 +98,34 @@ func messageLoop(port uint16, s *MIDINetworkSession) {
 			continue
 		}
 
-		msg, err := sip.Decode(buffer[:n])
-		if err != nil {
-			fmt.Println(err)
-			fmt.Println(hex.Dump(buffer[:n]))
-			continue
-		}
-		log.Printf("-> incoming message: %v", msg)
+		// received control packet?
+		if binary.BigEndian.Uint16(buffer[0:2]) == 0xffff {
 
-		conn, found := s.getConnection(msg)
-		if found {
-			conn.handleControl(msg, pc, addr)
+			msg, err := sip.Decode(buffer[:n])
+			if err != nil {
+				fmt.Println(err)
+				fmt.Println(hex.Dump(buffer[:n]))
+				continue
+			}
+			log.Printf("-> incoming message: %v", msg)
+
+			conn, found := s.getConnection(msg)
+
+			if found {
+				conn.handleControl(msg, pc, addr)
+			}
+		} else {
+			msg, err := rtp.Decode(buffer[:n])
+			if err != nil {
+				fmt.Println(err)
+				fmt.Println(hex.Dump(buffer[:n]))
+				continue
+			}
+			// log.Printf("RTP -> incoming rpt message: %v", msg)
+			conn, found := s.loadMIDIConnection(msg)
+			if found {
+				conn.handleRTP(msg, pc, addr)
+			}
 		}
 	}
 }
@@ -110,6 +139,15 @@ func (s *MIDINetworkSession) getConnection(msg sip.ControlMessage) (c *MIDINetwo
 		}
 		return conn.(*MIDINetworkStream), true
 	}
+	conn, found := s.connections.Load(msg.SSRC)
+	if !found {
+		log.Printf("Connection to SSRC [%x] not found", msg.SSRC)
+		return nil, false
+	}
+	return conn.(*MIDINetworkStream), found
+}
+
+func (s *MIDINetworkSession) loadMIDIConnection(msg rtp.MIDIMessage) (c *MIDINetworkStream, found bool) {
 	conn, found := s.connections.Load(msg.SSRC)
 	if !found {
 		log.Printf("Connection to SSRC [%x] not found", msg.SSRC)
